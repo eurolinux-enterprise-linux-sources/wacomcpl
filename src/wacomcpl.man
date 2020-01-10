@@ -1,0 +1,22 @@
+.TH wacomcpl 1 
+
+.SH NAME
+wacomcpl - graphical utility to configure Wacom tablets
+
+.SH SYNOPSIS
+.B wacomcpl [calibrate <device> [warning]]
+
+.SH DESCRIPTION
+wacomcpl is a graphical utility to configure and calibrate Wacom tablet
+devices.
+.SH OPTIONS
+.TP 8
+.B calibrate \fIdevice\fP [\fIwarning\fP]
+Bring up the calibration screen for the specified \fIdevice\fP. For any
+value of \fIwarning\fP, a coordinate check is performed after calibration.
+If the coordinates appear to be out of scope, a warning messages is
+displayed.
+.SH "SEE ALSO"
+wacom(4), xsetwacom(7)
+.SH COPYRIGHT
+Copyright 2011 Red Hat, Inc.

@@ -1,0 +1,26 @@
+From 90ed33a6e28d8ae3e0f38f557dffb38525b2f5aa Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Wed, 6 Jul 2011 13:02:51 +1000
+Subject: [PATCH 7/7] When resetting TwinView to none, reset the TVResolution
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ wacomcpl-exec |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/wacomcpl-exec b/wacomcpl-exec
+index 4c7e57b..38f3624 100755
+--- a/wacomcpl-exec
++++ b/wacomcpl-exec
+@@ -2005,6 +2005,8 @@ proc updateSet {} {
+ 	set getOption($device,TwinView) $tv
+ 	if { $tv != "none" } {
+ 	    guessTVResolution $device $tv
++	} else {
++	    updateWacomrcStylusAndEraser $device TVResolution "0 0 0 0"
+ 	}
+     }
+ 
+-- 
+1.7.1
+

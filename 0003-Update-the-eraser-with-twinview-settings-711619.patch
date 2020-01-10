@@ -1,0 +1,102 @@
+From d1d9228e370ef9357683558124e4959d36ff45a4 Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Mon, 23 May 2011 16:39:26 +1000
+Subject: [PATCH 3/7] Update the eraser with twinview settings (#711619)
+
+When the twinview settings for the stylus are changed, update the eraser
+too. This only works one-way, if the eraser is changed the stylus is _not_
+changed. Intentionally, in case a separate mapping for the eraser is
+required.
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ wacomcpl-exec |   43 +++++++++++++++++++++++--------------------
+ 1 files changed, 23 insertions(+), 20 deletions(-)
+
+diff --git a/wacomcpl-exec b/wacomcpl-exec
+index 94c5135..43df42e 100755
+--- a/wacomcpl-exec
++++ b/wacomcpl-exec
+@@ -168,6 +168,21 @@ set calibration_sequence_only 0
+ # coordinates after calibration (if required)
+ set calibration_with_warning 0
+ 
++# send the same data to the associated eraser if it is a stylus
++proc updateWacomrcStylusAndEraser { device option value } {
++	global getDeviceModel
++
++	updateWacomrc $device $option $value
++
++	set type $getDeviceModel($device,type)
++	if { ![ string compare -nocase $type "stylus" ] } {
++	    set eraser $getDeviceModel($device,eraser)
++	    if { [ string compare $eraser $device ] && $eraser != "" } {
++		updateWacomrc $eraser $option $value
++	    }
++	}
++}
++
+ proc updateCurrentScreenInfo {} {
+     global device numScreens currentScreen 
+     global screenXBottom screenYBottom screenX_org screenY_org 
+@@ -475,25 +490,13 @@ proc calibrationSequence {which xDev yDev} {
+ 	set yDevMax [expr $yDevMax + ($borderOffset * $heightDev / $heightX)]
+ 
+ 	if { $numScreens($device) > 1} {
+-	    updateWacomrc $device "Screen_No" $currentScreen
++	    updateWacomrcStylusAndEraser $device "Screen_No" $currentScreen
+ 	}
+ 
+-	updateWacomrc $device topx $xDevMin
+-	updateWacomrc $device topy $yDevMin
+-	updateWacomrc $device bottomx $xDevMax
+-	updateWacomrc $device bottomy $yDevMax
+-
+-	# send the same data to the associated eraser if it is a stylus
+-	set type $getDeviceModel($device,type)
+-	if { ![ string compare -nocase $type "stylus" ] } {
+-	    set eraser $getDeviceModel($device,eraser)
+-	    if { [ string compare $eraser $device ] && $eraser != "" } {
+-		updateWacomrc $eraser topx $xDevMin
+-		updateWacomrc $eraser topy $yDevMin
+-		updateWacomrc $eraser bottomx $xDevMax
+-		updateWacomrc $eraser bottomy $yDevMax
+-	    }
+-	}
++	updateWacomrcStylusAndEraser $device "topx" $xDevMin
++	updateWacomrcStylusAndEraser $device "topy" $yDevMin
++	updateWacomrcStylusAndEraser $device "bottomx" $xDevMax
++	updateWacomrcStylusAndEraser $device "bottomy" $yDevMax
+ 
+ 	if { $clickCheck == 1 } {
+ 	    messageWindow "Warning !!!" \
+@@ -1898,7 +1901,7 @@ proc guessTVResolution { device tv} {
+ 	}
+ 
+ 	exec xsetwacom set "$device" TVResolution "$w1 $h1 $w2 $h2"
+-	updateWacomrc $device TVResolution "$w1 $h1 $w2 $h2"
++	updateWacomrcStylusAndEraser $device TVResolution "$w1 $h1 $w2 $h2"
+     }
+ }
+ 
+@@ -1920,7 +1923,7 @@ proc updateSet {} {
+ 		}
+ 	    }
+ 	}
+-	updateWacomrc $device Screen_No $sn
++	updateWacomrcStylusAndEraser $device Screen_No $sn
+ 	set getOption($device,Screen_No) $sn
+     }
+ 
+@@ -1942,7 +1945,7 @@ proc updateSet {} {
+     }
+ 
+     if { $tv != $tvID } {
+-	updateWacomrc $device TwinView $tv
++	updateWacomrcStylusAndEraser $device TwinView $tv
+ 	set getOption($device,TwinView) $tv
+ 	if { $tv != "none" } {
+ 	    guessTVResolution $device $tv
+-- 
+1.7.1
+

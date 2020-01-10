@@ -7,7 +7,7 @@ bin_SCRIPTS= wacomcpl
 xinitrcdir = $(sysconfdir)/X11/xinit/xinitrc.d
 dist_xinitrc_SCRIPTS = wacomcpl.sh
 
-EXTRA_DIST = GPL wacomcpl.in
+EXTRA_DIST = GPL wacomcpl.in wacomcpl.man
 CLEANFILES = wacomcpl
 
 # Source dependencies
@@ -22,3 +22,4 @@ wacomcpl: wacomcpl.in Makefile
 	$(SED) $(SUBSTS) < $< > $@
 	chmod +x $@
 
+man1_MANS = wacomcpl.man

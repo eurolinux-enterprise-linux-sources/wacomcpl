@@ -1,0 +1,26 @@
+From 640b68670e967f30c79ad83f777029d7de463c8f Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Fri, 22 Jul 2011 11:52:09 +1000
+Subject: [PATCH] Add DTU-2231 to LCD range.
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ wacomcpl-exec |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/wacomcpl-exec b/wacomcpl-exec
+index 38f3624..0865205 100755
+--- a/wacomcpl-exec
++++ b/wacomcpl-exec
+@@ -2387,7 +2387,7 @@ proc updateModelInfo { } {
+     set isLCD(227) 1 
+ 
+     #Cintiq
+-    for { set i 197 } { $i <= 204 } { incr i 1 } {
++    for { set i 197 } { $i <= 206 } { incr i 1 } {
+ 	set isLCD($i) 1 
+     }
+ 
+-- 
+1.7.6
+

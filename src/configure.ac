@@ -2,7 +2,7 @@ dnl  Copyright 2010 Red Hat, Inc.
 dnl Process this file with autoconf to create configure.
 
 AC_PREREQ([2.57])
-AC_INIT(wacomcpl,[0.9.0], [], wacomcpl)
+AC_INIT(wacomcpl,[0.10.0], [], wacomcpl)
 AM_INIT_AUTOMAKE([foreign dist-bzip2])
 AM_MAINTAINER_MODE
 

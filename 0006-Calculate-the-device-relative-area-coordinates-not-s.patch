@@ -1,0 +1,84 @@
+From 54cfde8b5abddd80e30ab3369b901776540c1e56 Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Wed, 6 Jul 2011 14:09:07 +1000
+Subject: [PATCH 6/7] Calculate the device-relative area coordinates, not screen relative ones (#675672)
+
+Based on the X device coordinates we get, calculate the offset of the
+current screen, then subtract that from the coordinates we have. The
+final coordinates are what is dropped into the area property (TopX/TopY)
+
+This hopefully fixed the calibration issues seen on the Cintiqs.
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ wacomcpl-exec |   47 +++++++++++++++++++++++++++++++++++++++++++++++
+ 1 files changed, 47 insertions(+), 0 deletions(-)
+
+diff --git a/wacomcpl-exec b/wacomcpl-exec
+index 49f7ea7..4c7e57b 100755
+--- a/wacomcpl-exec
++++ b/wacomcpl-exec
+@@ -400,6 +400,41 @@ proc verifycalibResults { } {
+     }
+ }
+ 
++# Scale our screen's topX into device coordinates and return the x/y offset in
++# device coordinates.
++# The driver uses the device width on the current screen
++# and extends the axis range to match that. We just have to know that...
++# Returns a two-element list with x/y offset.
++proc calculate_screen_offset { device xDevMin xDevMax yDevMin yDevMax } {
++    global getOption
++    global desktopWidth desktopHeight screenWidth screenHeight
++    global screenX_org screenY_org
++
++    # We got those ones just after the xydefaults call
++    set dev_min_x $getOption($device,TopX)
++    set dev_min_y $getOption($device,TopY)
++    set dev_max_x $getOption($device,BottomX)
++    set dev_max_y $getOption($device,BottomY)
++    set dev_width [ expr $dev_max_x - $dev_min_x ]
++    set dev_height [ expr $dev_max_y - $dev_min_y ]
++    set ratio_x [ expr 1.0 * $desktopWidth / $screenWidth ]
++    set ratio_y [ expr 1.0 * $desktopHeight / $screenHeight ]
++
++    # calculate the axis ranges the driver uses
++    set total_dev_width [ expr $dev_width * $ratio_x ]
++    set total_dev_height [ expr $dev_width * $ratio_x ]
++
++    # device coordinate offset of current screen
++    set offset_x [ expr $total_dev_width * $screenX_org/$desktopWidth ]
++    set offset_y [ expr $total_dev_height * $screenY_org/$desktopWidth ]
++
++    set offset_x [ expr int($offset_x) ]
++    set offset_y [ expr int($offset_y) ]
++
++    return [ list $offset_x $offset_y ]
++}
++
++
+ # Callback function if one of the calibration windows registered a button
+ # event.
+ # Arguments:
+@@ -491,6 +526,18 @@ proc calibrationSequence {which xDev yDev} {
+ 
+ 	if { $numScreens($device) > 1} {
+ 	    updateWacomrcStylusAndEraser $device "Screen_No" $currentScreen
++
++	    # xDevMin/... are now in device coordinates relative to the screen.
++	    # we need to get them into device coordinates relative to the
++	    # device (i.e. 0..maxx)
++	    set offsets [ calculate_screen_offset $device $xDevMin $xDevMax $yDevMin $yDevMax ]
++
++	    set off_x [ lindex $offsets 0 ]
++	    set off_y [ lindex $offsets 1 ]
++	    set xDevMin [ expr $xDevMin - $off_x ]
++	    set xDevMax [ expr $xDevMax - $off_x ]
++	    set yDevMin [ expr $yDevMin - $off_y ]
++	    set yDevMax [ expr $yDevMax - $off_y ]
+ 	}
+ 
+ 	updateWacomrcStylusAndEraser $device "topx" $xDevMin
+-- 
+1.7.1
+

@@ -1,5 +1,5 @@
 Name:           wacomcpl
-Version:        0.9.0
+Version:        0.10.0
 Release:        3%{?dist}
 Summary:        Wacom driver configuration tool
 
@@ -12,43 +12,20 @@ Source0:        http://people.redhat.com/~phuttere/wacomcpl/%{name}-%{version}.t
 Source1:        wacomcpl.desktop
 Source2:        wacomcpl-icon.png
 
-# Bug 624560 - wacom control panel functions are not working
-# applies to Patch001 through to Patch016
-Patch001:       0001-Fix-typo-mode-should-be-mode.patch
-Patch002:       0002-Fix-typo-don-t-use-variablename-when-setting-a-varia.patch
-Patch003:       0003-Change-TwinView-settings-to-names-instead-of-numbers.patch
-Patch004:       0004-TwinView-returns-strings-not-numbers.patch
-Patch005:       0005-Purge-Xinerama-option-the-driver-doesn-t-handle-it.patch
-Patch006:       0006-Interpret-screen-number-of-255-as-1.patch
-Patch007:       0007-Handle-NumScreen-in-a-separate-function.patch
-Patch008:       0008-Hack-up-TwinView-settings.patch
-Patch009:       0009-Set-the-device-s-screen-number-after-selecting-a-cal.patch
-Patch010:       0010-Work-around-xsetwacom-xydefault-bug-by-supplying-dum.patch
-Patch011:       0011-Remove-blinking-animation-on-messageWindow.patch
-Patch012:       0012-If-TVResolution-isn-t-set-show-an-error-and-exit.patch
-Patch013:       0013-Change-to-use-TVResolution-instead-of-TVResolution0-.patch
-Patch014:       0014-Show-an-error-window-if-the-device-wasn-t-found.patch
-Patch015:       0001-If-TwinView-is-selected-try-to-guess-the-TVResolutio.patch
-Patch016:       0001-Append-not-prepend-wacomcplrc-commands.patch
-
-# Bug 624560 - wacom control panel functions are not working, Comment 36
-# https://bugzilla.redhat.com/show_bug.cgi?id=624560#c36
-Patch017:       0001-Fix-invalid-parsing-of-mode.patch
-Patch018:       0002-Change-button-mapping-from-Button-2-to-simply-2.patch
-Patch019:       0003-Use-case-insensitive-type-comparison.patch
-Patch020:       0004-Fix-parsing-of-TPCButton.patch
-Patch021:       0005-Parse-key-and-button-as-special-configurations.patch
-Patch022:       0006-Button-Ignore-should-mean-button-0.patch
-Patch023:       0007-Hack-in-ignorebutton-handling.patch
-Patch024:       0008-Disallow-doubleclick-use-button-1-1-instead.patch
-Patch025:       0009-Purge-screen-toggle-this-isn-t-supported-by-the-driv.patch
-Patch026:       0010-Fix-reset-handling-for-displaytoggle-modetoggle-and-.patch
-
-Patch027:       0001-update-the-screen-number-when-calibrating.patch
-
-# Bug 694346 Cintiq support 
-Patch028:       0001-Fill-the-default-button-array-with-up-to-max-buttons.patch
-Patch029:       0002-Add-Cintiq-model-support.patch
+# For my sanity
+Patch001: 0001-Check-for-AC_CHECK_LIB-success-when-testing-for-Tcl-.patch
+Patch002: 0002-Rename-getDeviceOptionProc-to-updateDeviceOptionProc.patch
+# Bug 711619 - wacomcpl - Fix set eraser mappings same as stylus
+Patch003: 0003-Update-the-eraser-with-twinview-settings-711619.patch
+# Bug 711618 - Allow multiple wacomcplrc files to be used 
+Patch004: 0004-Allow-for-host-specific-wacomcplrc-711618.patch
+# Bug 675672 - wacomcpl calibration slightly off with twiview set up to "leftOf"
+Patch005: 0005-Read-default-area-values-before-starting-calibration.patch
+Patch006: 0006-Calculate-the-device-relative-area-coordinates-not-s.patch
+# related to Bug 711619
+Patch007: 0007-When-resetting-TwinView-to-none-reset-the-TVResoluti.patch
+# DTU-2231 support
+Patch008: 0001-Add-DTU-2231-to-LCD-range.patch
 
 # wacom driver doesn't exist on those
 ExcludeArch:    s390 s390x
@@ -57,7 +34,7 @@ BuildRequires:  automake libtool
 BuildRequires:  libX11-devel libXext-devel libXi-devel
 BuildRequires:  tcl-devel tk-devel desktop-file-utils
 
-Requires:       xorg-x11-drv-wacom >= 0.10.5-8
+Requires:       xorg-x11-drv-wacom >= 0.10.5-11
 Requires:       libX11 libXi libXext
 Requires:       tcl tk
 # for xdpyinfo
@@ -70,38 +47,17 @@ the xorg-x11-drv-wacom driver.
 
 %prep
 %setup -q
-%patch001 -p1 
-%patch002 -p1 
-%patch003 -p1 
-%patch004 -p1 
-%patch005 -p1 
-%patch006 -p1 
-%patch007 -p1 
-%patch008 -p1 
-%patch009 -p1 
-%patch010 -p1 
-%patch011 -p1 
-%patch012 -p1 
-%patch013 -p1 
-%patch014 -p1 
-%patch015 -p1 
-%patch016 -p1 
-%patch017 -p1 
-%patch018 -p1 
-%patch019 -p1 
-%patch020 -p1 
-%patch021 -p1 
-%patch022 -p1 
-%patch023 -p1 
-%patch024 -p1 
-%patch025 -p1 
-%patch026 -p1 
-%patch027 -p1 
-%patch028 -p1 
-%patch029 -p1 
+%patch001 -p1
+%patch002 -p1
+%patch003 -p1
+%patch004 -p1
+%patch005 -p1
+%patch006 -p1
+%patch007 -p1
+%patch008 -p1
 
 %build
-autoreconf -v --install || exit 1
+autoreconf -v --force --install || exit 1
 %configure
 make %{?_smp_mflags}
 
@@ -136,8 +92,21 @@ rm -rf %{buildroot}
 %{_datadir}/applications/gnome-wacomcpl.desktop
 %{_datadir}/wacomcpl/wacomcpl.desktop
 %{_datadir}/wacomcpl/wacomcpl-icon.png
+%{_mandir}/man1/wacomcpl.1*
 
 %changelog
+* Fri Jul 22 2011 Peter Hutterer <peter.hutterer@redhat.com> 0.10.0-3
+- Add DTU 2231 to list of LCD models (related #705210)
+
+* Wed Jul 06 2011 Peter Hutterer <peter.hutterer@redhat.com> 0.10.0-2
+- Fix cintiq calibration issues (#675672)
+- Set eraser mappings same as stylus (#711619)
+- Allow multiple wacomcplrc files to be used  (#711618)
+
+* Fri Jul 01 2011 Peter Hutterer <peter.hutterer@redhat.com> 0.10.0-1
+- wacomcpl 0.10.0 (#713864)
+- Drop all patches, merged upstream
+
 * Tue Apr 12 2011 Peter Hutterer <peter.hutterer@redhat.com> 0.9.0-3
 - Add Cintiq support (#694346)
 

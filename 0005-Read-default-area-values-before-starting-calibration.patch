@@ -1,0 +1,43 @@
+From 15d6b8ced2eaba893511c5ad5870b6b0ecf53fe2 Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Fri, 17 Jun 2011 03:58:53 +1000
+Subject: [PATCH 5/7] Read default area values before starting calibration.
+
+Reset the area property with xydefault, then read in the default values
+(which are what the driver initializes to device min/max)
+---
+ wacomcpl-exec |    9 +++++++++
+ 1 files changed, 9 insertions(+), 0 deletions(-)
+
+diff --git a/wacomcpl-exec b/wacomcpl-exec
+index 07bfe6b..49f7ea7 100755
+--- a/wacomcpl-exec
++++ b/wacomcpl-exec
+@@ -583,6 +583,7 @@ proc startCalibration {} {
+     global calibResults calibX_org calibY_org calibX_botm calibY_botm
+     global screenX_org screenY_org screenXBottom screenYBottom
+     global screenWidth screenHeight calibration_sequence_only
++    global Option getOption
+     
+     if { $numScreens($device) > 1 } {
+ 	if { $calibration_sequence_only == 0 } {
+@@ -616,8 +617,16 @@ proc startCalibration {} {
+     #
+     # Start calib sequence
+     catch {unset calibResults}
++    # Reset the property, the driver will reset it to the device-specific
++    # values. Read those values in, we need them later.
+     exec xsetwacom set "$device" xydefault 0
+ 
++    set Option(1) "TopX"
++    set Option(2) "TopY"
++    set Option(3) "BottomX"
++    set Option(4) "BottomY"
++    updateDeviceOptionProc $device 4
++
+     .topleft.m configure -background "#df94df"
+     # hide the cursor
+     .topleft.m configure -cursor "center_ptr #df94df #df94df"
+-- 
+1.7.1
+

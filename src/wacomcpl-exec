@@ -34,44 +34,138 @@ exec wish -f "$0" ${1+"$@"}
 # Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #
 # 		WARNING
-# The variables getOption() and getOptionDefault() are arrays, not function
-# calls. getOption(foo) thus retrieves the previously stored value for key
-# "foo", it does not execute anything more.
-# Yes, this is awkward.
+# This code is a minefield. A few hints on how to deal with this:
+# - TCL cannot return arrays or pass them as arguments to a function,
+# one has to serialize the array and pass it [http://wiki.tcl.tk/3262]
+# The original author(s) have chosen not to do so, instead relying on global
+# variables. Some functions still pass parameters, but arrays are all global
+# variables. Instead global vars are set that are then used by the caller.
+#
+# - Wacomcpl sometimes passes variables around, but most variables are
+# simply declared as global and changed wherever they are needed. Plus, most
+# functions simply import everything as global, even the variables they
+# don't need. See the lookup table below.
+#
+# - Variable naming: a change in the wacom driver to _not_ store the
+# defaults for everything and the world means that wacomcpl can only "reset"
+# (to pre-saved status) but not "load defaults" since it doesn't know the
+# defaults. Those bits and pieces that claim to load defaults simply reset.
+#
+# Variable lookup table for global but undeclared variables (this list is
+# incomplete):
+# bName():
+#	boolean array, keys are "pressure", "button", etc. The values are
+#	used to enable/disable buttons
+# calibX_org, calibX_org, calibX_btm, calibY_btm:
+#	The 4 coordinates of the screen to be calibrated to (in screen
+#	coords)
+# calibResults():
+#	Array: keys "xDev", "yDev", value for each an int[2] for the actual
+#	values, calibResults(xDev, 0) == min_x, calibResults(xDev, 1) == max_x
+# clickCheck
+#	If 1, wacomcpl displays a "is it better now?" window after
+#	calibration
+# currentb:
+# currentk:
+#	The currently selected button to be dealt with, or key.
+# currentW:
+# 	Current window, value either .keyboard or .allothers, possibly
+# 	because keyboard is a subwindow of the other window.
+# db():
+# 	array, index is button number (see also modeToggleB), value is the
+# 	GUI name for this button.
+# db1, db2, db3, ... db14:
+# 	Probably the predecessors of db(), but who cares. Unused.
+# dm():
+#	array, two values, "Relative" and "Absolute"
+# getOption(device name, option name):
+#	Stores the value of the option for the device, after a call to
+#	getDeviceOptionProc (see there for more details)
+# hasPad():
+# hasTouch():
+# hasGesture():
+# isLCD():
+#	boolean array, index is the model number
+# Option():
+#	Option values to be retrieved by getDeviceOptionProc  (see there for
+#	more details)
+# numPadButtons():
+# numPadRelW():
+# numPadAbsW():	(this one is always filled with 0)
+# numPadRings():
+# numPadStrips():
+#	numeric array, index is the model number, value is number of
+#	buttons/rings
+# numScreens():
+#	Array, key: device name, value is number of screens for the device
+# sm():
+#	Array, two values "Side Switch Only", "Side Switch + Tip"
+# snd:
+#	Screen "default" setting (the one selected on dialog init)
+# spName():
+#	Strip names, numeric array button number : strip name
+# tvID:
+#	int, current twinview settings
+# tvd:
+#	TwinView "default" setting (the one selected on dialog init)
+# wName():
+#	Array, filled with the button labels to be used. These names are
+#	all filled statically once (with one exception). When used, the code
+#	uses wName(index) to get the right label. No joke.
+# xDevMin, xDevMax:
+# yDevMin, yDevMax:
+#	minx, maxx, miny, maxy in device coordinates
 
 package require LIBWACOMXI
 
 set currentScreen 0
 set desktopWidth [ winfo screenwidth . ]
 set desktopHeight [ winfo screenheight . ]
+# Dimensions of the current screen if tied to a screen
 set screenWidth [ winfo screenwidth . ]
 set screenHeight [ winfo screenheight . ]
 set screenXBottom [ winfo screenwidth . ]
 set screenYBottom [ winfo screenheight . ]
 
+# Screen Origin x/y
 set screenX_org 0
 set screenY_org 0
 set swapThresh 100
+# Size of the calibration windows (they're square)
 set size 200
+# Size of the little circle inside the calibration window
 set circle_size 10
+# length of the crosshair lines around the circle in the calibration window
 set line_size 30
 set config_file "~/.wacomcplrc"
 
+# Main window location and size
 set origin_x [ expr ($desktopWidth/2) - ($desktopWidth/4) ]
 set origin_y [ expr ($desktopHeight/2) - ($desktopHeight/4) ]
 set windowSize "700x300"
 
 set device ""
+# In theory, it'd enable Help. Except that nothing ever set it...
 set showHelp 0
+# The following fooB keys are indices for buttons that don't reflect actual
+# button mappings. because the wacom driver assumes 32 buttons as max, the
+# ones > 32 are special button numbers that are then mapped elsewhere.
 set modeToggleB 33
 set ignoreButton 34
 set doubleClickB 35
 set displayToggleB 36
-set screenToggleB 37
 set keystrokeB 38
+
+# Highest model number for any tablet. Needed for numPadButtons and
+# friends.
 set maxNumTablets 227
 set numControls 0
+set maxNumButtons 18
+set maxNumStripEvents 4
+# 1 if run as wacomcpl calibrate "device name"
 set calibration_sequence_only 0
+# 1 if run with exactly 3 arguments, prints out a warning about strange
+# coordinates after calibration (if required)
 set calibration_with_warning 0
 
 proc updateCurrentScreenInfo {} {
@@ -90,7 +184,12 @@ proc updateCurrentScreenInfo {} {
    }
 }
 
-proc pad {name geometry} {
+# Creates one of the pink calibration windows and draws the little circle
+# into it.
+# Arguments:
+# 	name: the name this window will be referred to
+# 	geometry: geometry string in the form +x+y
+proc create_calibration_window {name geometry} {
     global size circle_size line_size
 
     set circleox [ expr $size/2-$circle_size/2 ]
@@ -114,6 +213,10 @@ proc pad {name geometry} {
     pack $name.m
 }
 
+# Write out the wacomcplrc file __and__ run xsetwacom to apply the settings
+# to the device right now as well.
+# If the file already exists, a backup copy is made and all existing options
+# will be replaced and new options will be __appended__
 proc updateWacomrc {device option value} {
     global config_file
 
@@ -122,8 +225,8 @@ proc updateWacomrc {device option value} {
     } else {
 	file copy -force $config_file $config_file~
 	exec sed -e "/xsetwacom set \"$device\" $option /d" < $config_file > /tmp/wacomcpl.tmp
-	exec echo "xsetwacom set \"$device\" $option \"$value\"" > $config_file
-	exec cat /tmp/wacomcpl.tmp >> $config_file
+	exec cat /tmp/wacomcpl.tmp > $config_file
+	exec echo "xsetwacom set \"$device\" $option \"$value\"" >> $config_file
 	file delete -force /tmp/wacomcpl.tmp
     }
     if { $option == "PressCurve" } {
@@ -282,6 +385,13 @@ proc verifycalibResults { } {
     }
 }
 
+# Callback function if one of the calibration windows registered a button
+# event.
+# Arguments:
+#   which: state machine.
+#		0 .. top left calibration window clicked
+#		1 .. bottom right calibration window clicked
+#   xDev, yDev: x/y coordinates in device coordinates
 proc calibrationSequence {which xDev yDev} {
     global device calibResults screenY_org screenX_org orig_device
     global workingTags screenTags size numScreens
@@ -291,6 +401,7 @@ proc calibrationSequence {which xDev yDev} {
     global xDevMin xDevMax yDevMin yDevMax
     global calibration_sequence_only clickCheck 
     global calibration_with_warning
+    global currentScreen numScreens
 
     set scaling [exec xsetwacom get "$device" xscaling]
     if { $scaling == 1 } {
@@ -303,6 +414,7 @@ proc calibrationSequence {which xDev yDev} {
     set calibResults(xDev,$which) $xDev
     set calibResults(yDev,$which) $yDev
 
+    # Top left calibration window clicked.
     if { $which == 0 } {
 	wacomxi::bindevent .topleft.m "$orig_device" <ButtonRelease> ""
 
@@ -320,8 +432,11 @@ proc calibrationSequence {which xDev yDev} {
 	.bottomright.m configure -cursor "center_ptr #df94df #df94df"
 	wacomxi::bindevent .bottomright.m "$orig_device" <ButtonRelease> \
 		{calibrationSequence 1 %0 %1}
+
+    # Bottom right calibration window clicked
     } elseif { $which == 1 } {
 	wacomxi::bindevent .bottomright.m "$orig_device" <ButtonRelease> ""	
+	# Offset to screen edges (__not__ related to window borders at all
 	set borderOffset [expr ($size / 2 )]
 
 	set xDevMax $calibResults(xDev,1)
@@ -359,6 +474,10 @@ proc calibrationSequence {which xDev yDev} {
 	set yDevMin [expr $yDevMin - ($borderOffset * $heightDev / $heightX)]
 	set yDevMax [expr $yDevMax + ($borderOffset * $heightDev / $heightX)]
 
+	if { $numScreens($device) > 1} {
+	    updateWacomrc $device "Screen_No" $currentScreen
+	}
+
 	updateWacomrc $device topx $xDevMin
 	updateWacomrc $device topy $yDevMin
 	updateWacomrc $device bottomx $xDevMax
@@ -366,7 +485,7 @@ proc calibrationSequence {which xDev yDev} {
 
 	# send the same data to the associated eraser if it is a stylus
 	set type $getDeviceModel($device,type)
-	if { ![ string compare $type "stylus" ] } {
+	if { ![ string compare -nocase $type "stylus" ] } {
 	    set eraser $getDeviceModel($device,eraser)
 	    if { [ string compare $eraser $device ] && $eraser != "" } {
 		updateWacomrc $eraser topx $xDevMin
@@ -421,7 +540,7 @@ proc Calibration {} {
     set tvID $getOption($device,TwinView)
 
     if { $calibration_sequence_only == 0 } {
-	if { $mode != 1 && mode != "Absolute" } {
+	if { $mode != 1 && $mode != "Absolute" } {
 	    disableButtons
 	    messageWindow "Warning " "\n\nDevice $device is in relative mode. \n\
 		You can calibrate $device only when it is in absolute mode. \n\
@@ -453,6 +572,9 @@ proc Calibration {} {
     }
 }
 
+# Initialises the two pink calibration windows, set them to the
+# active/inactive color and registers for mouse events.
+# When a mouse event is registred, calibrationSequence() is called
 proc startCalibration {} {
     global device size numScreens tvID orig_device
     global calibResults calibX_org calibY_org calibX_botm calibY_botm
@@ -481,15 +603,17 @@ proc startCalibration {} {
 	set calibX_botm $screenXBottom
 	set calibY_botm $screenYBottom
     }
+    # calculate the x/y for the bottom right calibration window
     set y_coor [ expr $calibY_botm-$size*(abs($calibY_botm)/$calibY_botm) ]
     set x_coor [ expr $calibX_botm-$size*(abs($calibX_botm)/$calibX_botm) ]
-    pad .topleft +$calibX_org+$calibY_org
-    pad .bottomright +$x_coor+$y_coor
+
+    create_calibration_window .topleft +$calibX_org+$calibY_org
+    create_calibration_window .bottomright +$x_coor+$y_coor
     update
     #
     # Start calib sequence
     catch {unset calibResults}
-    exec xsetwacom set "$device" xydefault
+    exec xsetwacom set "$device" xydefault 0
     .topleft.m configure -background "#df94df"
     # hide the cursor
     .topleft.m configure -cursor "center_ptr #df94df #df94df"
@@ -505,6 +629,8 @@ proc startCalibration {} {
 		by $device before you finish"
 }
 
+# Displays a help window, except that showHelp is always 0 so it never does
+# anything. Woo!
 proc helpWindow { tString mString } {
     global showHelp
 
@@ -522,19 +648,12 @@ proc messageWindow { tString mString } {
 		-command "destroy .mWindow; set ok 1"
     .mWindow.text insert end $mString
     pack .mWindow.text .mWindow.dismiss
-    #
-    # Do some spiffy animation to draw attention !
-    for { set i 0 } { $i < 10 } { incr i } {
-	after 100
-	.mWindow.text configure -background white
-	update
-	after 100
-	.mWindow.text configure -background gray
-	update
-    }
+
     tkwait variable ok 
 }
 
+# Callback when a screen has been selected on the screen selection list.
+# Sets the device to the current screen, then starts calibration
 proc updateScreenList {} {
     global currentScreen numScreens screenWidth screenHeight
     global device screenX_org screenY_org origin_x origin_y
@@ -553,6 +672,7 @@ proc updateScreenList {} {
 		set i $numScreens($device)
 	    }
 	}
+	exec xsetwacom set "$device" Screen_No $currentScreen
     }
     updateCurrentScreenInfo
     set origin_x [ expr $screenX_org+$screenWidth/2-$screenWidth/4 ]
@@ -571,6 +691,9 @@ proc updateScreenList {} {
     startCalibration
 }
 
+# Disable the buttons set to 1 in $bName(). This function only disables,
+# because clearly, having this function enable buttons as well would just be
+# too straightforward. So we duplicate the enable code in closeTabWindow()
 proc disableButtons {} {
     global bName numButton numStrips currentW currentb
 
@@ -601,11 +724,19 @@ proc disableButtons {} {
 }
 
 # Retrieve the option numbered $i from the given device $dev.
-# This comes from the global Option array, but this seems to be at least
-# partially filled by hand??
+# To get this method to do anything useful, you need to store the options
+# you want in the global Option array and then pass the _number_ of options
+# you want into here. The result is then in the global getOption(device
+# name, option name). e.g. if you need options Foo and Bar, you'd do
+#	set Option(1) "Foo"
+#	set Option(2) "Bar"
+#	getDeviceOptionProc $device $2
+#	set foo_value $getOption($device,Foo)
+#
+# I'm not kidding.
 proc getDeviceOptionProc { dev i } {
     global getOption getOptionDefault Option oldKeys modeToggleB
-    global displayToggleB ignoreButton screenToggleB doubleClickB keystrokeB 
+    global displayToggleB ignoreButton keystrokeB
     global numStrips numControls numButton spName
 
     for { set j 1 } { $j < [ expr $i+1 ] } { incr j 1 } {
@@ -614,8 +745,12 @@ proc getDeviceOptionProc { dev i } {
 	    continue
 	}
 
+	# NumScreens is special
+	if { ![ string compare -nocase -length 10 $Option($j) "NumScreen" ] } {
+	    set getOption($dev,NumScreen) [ getNumScreen $dev ]
+
 	# PressCurve is special, returns 4 values
-	if { ![ string compare -nocase -length 10 $Option($j) "PressCurve" ] } {
+	} elseif { ![ string compare -nocase -length 10 $Option($j) "PressCurve" ] } {
 	    # Wacomcpl doesn't export the pressure curve as curve but merely
 	    # as a setting between 1 and 7 that maps into a set of ranges.
 	    # the default value for this is 4 (0 0 100 100).
@@ -668,11 +803,10 @@ proc getDeviceOptionProc { dev i } {
 	    set getOption($dev,$Option($j)) $value
 	    set getOptionDefault($dev,$Option($j)) $value
 	    if { $match } {
-		if { ($value > $doubleClickB) || ($value == 0) } {
-		    if { ![string compare -nocase -length 8 DBLCLICK $value ] } {
-			set getOption($dev,$Option($j)) $doubleClickB
-		    }
-		    if { ![string compare -nocase -length 4 CORE $value ] } {
+		if { ($value > $ignoreButton) || ($value == 0) } {
+		    if { ![string compare -nocase -length 4 CORE $value ]  ||
+			 ![string compare -nocase -length 3 KEY $value ] ||
+			 ![string compare -nocase -length 6 BUTTON $value ] } {
 			set getOption($dev,$Option($j)) $keystrokeB
 			set oldKeys($Option($j)) $value
 		    }
@@ -681,9 +815,6 @@ proc getDeviceOptionProc { dev i } {
 		    }
 		    if { ![string compare -nocase -length 13 DISPLAYTOGGLE $value ] } {
 			set getOption($dev,$Option($j)) $displayToggleB
-		    }
-		    if { ![string compare -nocase -length 12 SCREENTOGGLE $value ] } {
-			set getOption($dev,$Option($j)) $screenToggleB
 		    }
 		    if { $value == 0 } {
 			set getOption($dev,$Option($j)) $ignoreButton
@@ -694,6 +825,8 @@ proc getDeviceOptionProc { dev i } {
     }
 }
 
+# Create the device panel, based on the model some buttons are enabled,
+# disabled. The 0 1 0 0 etc decides which buttons are to be disabled.
 proc CreateDevicePanel { type model } {
     global hasPad isLCD hasTouch hasGesture
 
@@ -724,6 +857,7 @@ proc CreateDevicePanel { type model } {
     }
 }
 
+# Callback for the device list on the left panel
 proc updateDevice {} {
     global device orig_device getDeviceModel
 
@@ -789,13 +923,13 @@ proc createDeviceList {} {
 
     foreach dev $deviceList {
 	set type $getDeviceModel($dev,type)
-	if { ![string compare $type "eraser"] } {
+	if { ![string compare -nocase $type "eraser"] } {
 	    set model $getDeviceModel($dev,model)
 	    foreach dev1 $deviceList {
 		set type1 $getDeviceModel($dev1,type)
 		set model1 $getDeviceModel($dev1,model)
 		if { ( $model == $model1 ) &&
-			 ![string compare $type1 "stylus"] } {
+			 ![string compare -nocase $type1 "stylus"] } {
 		    set getDeviceModel($dev1,eraser) $dev
 		}
 	    }
@@ -826,37 +960,110 @@ proc createDeviceListPanel {} {
     bind .workingDev.list <ButtonRelease-1> updateDevice
 }
 
-proc createScreenList { dev } {
-    global numScreens currentScreen getScreenInfo
-
-    # NumScreens was an exported property by the wacom driver. Values were
-    # ScreenCount(3) for non-NVIDIA TwinView, and 2 for NV-TV. We can get
-    # that through other means.
-    # I don't know how to get the ScreenCount with Tk though, so we parse
-    # the xdpyinfo output. Note that this duplicates the linuxwacom bug - on
-    # RandR 1.2, screenInfo.numScreens is always 1 though there may be two
-    # phys. monitors.
+# NumScreens was an exported property by the wacom driver. Values were
+# ScreenCount(3) for non-NVIDIA TwinView, and 2 for NV-TV. We can get
+# that through other means.
+# I don't know how to get the ScreenCount with Tk though, so we parse
+# the xdpyinfo output. Note that this duplicates the linuxwacom bug - on
+# RandR 1.2, screenInfo.numScreens is always 1 though there may be two
+# phys. monitors.
+proc getNumScreen { dev } {
     set num_screen [exec xdpyinfo | grep "number of screens" | sed -e "s/number of screens:\[ \]\*//"]
 
     if { $num_screen == 1 } {
 	set twinview [ exec xsetwacom get "$dev" TwinView ]
 	if { $twinview != "none" } {
-	    set $num_screen 2
+	    set num_screen 2
 	}
     }
 
+    return $num_screen
+}
+
+proc createScreenList { dev } {
+    global numScreens currentScreen getScreenInfo
+
+    set num_screen [ getNumScreen $dev ]
+
     set numScreens($dev) $num_screen
-    catch {
+    if { [ catch {
 	for { set i 0 } {$i < $numScreens($dev)} { incr i 1 } {
 	    set s1 [ exec xsetwacom get "$dev" SBottomX$i ]
 	    set s2 [ exec xsetwacom get "$dev" SBottomY$i ]
 	    set s3 [ exec xsetwacom get "$dev" STopX$i ]
 	    set s4 [ exec xsetwacom get "$dev" STopY$i ]
-	    set getScreenInfo($dev,Screen$i) "$s1 $s2 $s3 $s4"
 	}
-    } msg
+	set getScreenInfo($dev,Screen$i) "$s1 $s2 $s3 $s4"
+    } msg ] } {
+	# if the above fails, the driver only sees one screen but we
+	# pretend to have 2 (NVIDIA TwinView). The above fails because
+	# "propert offset doesn't exist" so we have to fake the actual
+	# values by querying TVResolution0/1 that was hopefully magically
+	# set by the user beforehand...
+	set tvres [ exec xsetwacom get "$dev" "TVResolution" ]
+	set s0x [ lindex $tvres 0 ]
+	set s0y [ lindex $tvres 1 ]
+	set s1x [ lindex $tvres 2 ]
+	set s1y [ lindex $tvres 3 ]
+
+	if { $s0x == 0 && $s0y == 0 && $s1x == 0 && $s1y == 0 } {
+	    messageWindow "Error" "\n\n Device $dev configured \n\
+			  for TwinView but option TVResolution \n\
+			  is not set.\n\
+			  Please set TVResolution and try again."
+			  exit 1
+	}
+
+	# getScreenInfo for some reason stores as bottom x/y top x/y instead
+	# of the other way round.  Usage of s() is top x/y bottom x/y though.
+	for { set i 0 } { $i < 8 } { incr i 1 } {
+	    set s($i) 0
+	}
+
+	set tv_config [ exec xsetwacom get "$dev" "TwinView" ]
+
+	switch $tv_config {
+	    "normal" { return }
+	    "horizontal" {
+		set s(2) $s0x
+		set s(3) $s0y
+		set s(4) [ expr $s0x ]
+		set s(5) 0
+		set s(6) [ expr $s0x + $s1x ]
+		set s(7) $s1y
+	    }
+	    "leftof" {
+		set s(6) $s0x
+		set s(7) $s0y
+		set s(0) [ expr $s0x ]
+		set s(1) 0
+		set s(2) [ expr $s0x + $s1x ]
+		set s(3) $s1y
+	    }
+	    "vertical" {
+		set s(2) $s0x
+		set s(3) $s0y
+		set s(4) 0
+		set s(5) [ expr $s0y ]
+		set s(6) [ expr $s0x ]
+		set s(7) [ expr $s0y + $s1y ]
+	    }
+	    "belowof" {
+		set s(6) $s0x
+		set s(7) $s0y
+		set s(0) 0
+		set s(1) [ expr $s0y ]
+		set s(2) [ expr $s0x ]
+		set s(3) [ expr $s0y + $s1y ]
+	    }
+	}
+
+	set getScreenInfo($dev,Screen0) "$s(2) $s(3) $s(0) $s(1)"
+	set getScreenInfo($dev,Screen1) "$s(6) $s(7) $s(4) $s(5)"
+    }
 }
 
+# Callback for "Close" button on screen list window
 proc screenCancel {} {
     global calibration_sequence_only
 
@@ -869,6 +1076,7 @@ proc screenCancel {} {
     }
 }
 
+# This one actually does what it says on the box.
 proc displayScreenList { dev } {
     global numScreens currentScreen calibration_sequence_only
 
@@ -918,11 +1126,12 @@ proc displayScreenList { dev } {
     }
 }
 
+# Callback for "Save" button on Button config window.
 proc updateButton {} {
     global device getDeviceModel sm getOption spName isLCD
     global dm currentW oldKeys numButton cKeys numStrips startS
-    global modeToggleB ignoreButton doubleClickB keystrokeB 
-    global displayToggleB screenToggleB
+    global modeToggleB ignoreButton keystrokeB
+    global displayToggleB
 
     set type $getDeviceModel($device,type)
     set model $getDeviceModel($device,model)
@@ -935,31 +1144,25 @@ proc updateButton {} {
 	switch [ $currentW.f.$i cget -text ] {
 	    "Left"
 		{ set j 1 
-		  set v "Button 1" }
+		  set v "1" }
 	    "Middle"
 		{ set j 2 
-		 set v "Button 2" }
+		 set v "2" }
 	    "Right"
 		{ set j 3 
-		 set v "Button 3" }
+		 set v "3" }
 	    "Fourth"
 		{ set j 4 
-		 set v "Button 4" }
+		 set v "4" }
 	    "Fifth"
 		{ set j 5 
-		 set v "Button 5" }
-	    "Left Double"
-		{ set j $doubleClickB
-		 set v "DBLCLICK 1" }
+		 set v "5" }
 	    "Mode Toggle"
 		{ set j $modeToggleB
 		 set v "ModeToggle 1" }
 	    "Display Toggle"
 		{ set j $displayToggleB
 		 set v "DisplayToggle 1" }
-	    "Screen Toggle"
-		{ set j $screenToggleB
-		 set v "ScreenToggle 1" }
 	    "KeyStroke"
 		{ set j $keystrokeB 
 		 if { $cKeys($spName($k)) == "" } {
@@ -970,7 +1173,7 @@ proc updateButton {} {
 		 } }
 	    "Ignore"
 		{ set j $ignoreButton
-		 set v "Button $j" }
+		 set v "0" }
 	}
 	set getOption($device,$spName($k)) $j
 	updateWacomrc $device $spName($k) $v
@@ -982,7 +1185,7 @@ proc updateButton {} {
 	}
     }
 
-    if { !$isLCD($model) && [string compare $type "pad"] } { 
+    if { !$isLCD($model) && [string compare -nocase $type "pad"] } { 
 	set mode [ $currentW.f.mode cget -text ]
 	updateWacomrc $device mode $mode
 	if { $mode == $dm(1) } {
@@ -992,7 +1195,7 @@ proc updateButton {} {
 	}
     }
 
-    if { ![ string compare $type "stylus" ] } {
+    if { ![ string compare -nocase $type "stylus" ] } {
 	    set smode [ $currentW.f.smode cget -text ]
 	    if { $smode == $sm(1) } {
 		updateWacomrc $device TPCButton off
@@ -1005,13 +1208,30 @@ proc updateButton {} {
     closeSubWindow
 }
 
+# Callback for "Reset" button on the buttons window. Resets the buttons to
+# their previous state.
 proc defaultButton {} {
     global db db1 db2 db3 db4 db5 db6 db7 db8 db9 db10
     global db11 db12 db13 db14 isLCD
     global dm sm dmv smv numButton startS numStrips spName
     global device getOptionDefault getDeviceModel
+    global ignoreButton keystrokeB modeToggleB displayToggleB
+
     for { set i 1 } { $i <= $numButton } { incr i 1 } {
-	set db$i $db($getOptionDefault($device,$spName($i)))
+	set btn $getOptionDefault($device,$spName($i))
+	if { $btn == 0 } { set btn $ignoreButton }
+	if { ![string compare -nocase -length 4 CORE $btn ]  ||
+		    ![string compare -nocase -length 3 KEY $btn ] ||
+		    ![string compare -nocase -length 6 BUTTON $btn ] } {
+	    set btn $keystrokeB
+	}
+	if { ![string compare -nocase -length 10 MODETOGGLE $btn ] } {
+	    set btn $modeToggleB
+	}
+	if { ![string compare -nocase -length 13 DISPLAYTOGGLE $btn ] } {
+	    set btn $displayToggleB
+	}
+	set db$i $db($btn)
     }
 
     if { $startS } {
@@ -1024,30 +1244,41 @@ proc defaultButton {} {
     set model $getDeviceModel($device,model)
     set type $getDeviceModel($device,type)
 
-    if { !$isLCD($model) && [ string compare $type "pad" ] } { 
-	set dmv $dm([ expr $getOptionDefault($device,Mode)+1 ])
+    if { !$isLCD($model) && [ string compare -nocase $type "pad" ] } { 
+	# dmv is the return value of the tk_optionMenu that displays the
+	# mode options. yes, indeed. whoop. dee. doo.
+	set mode $getOptionDefault($device,Mode)
+	if { $mode == "Absolute" } { set mode 1 }
+	if { $mode == "Relative" } { set mode 0 }
+	set dmv $dm([ expr $mode + 1 ])
     }
 
-    if { ![ string compare $type "stylus" ] } {
-	set smv $sm([ expr $getOptionDefault($device,TPCButton)+1 ])
+    if { ![ string compare -nocase $type "stylus" ] } {
+	set tpcbutton $getOptionDefault($device,TPCButton)
+	if { $tpcbutton == "on" } { set tpcbutton 1 }
+	if { $tpcbutton == "off" } { set tpcbutton 0 }
+	set smv $sm([ expr $tpcbutton + 1 ])
     }
 }
 
+# 'get' the number of buttons for the given tool type. Tool type is e.g.
+# "eraser". Since the original authors seem to be unaware of how to return
+# values, stuff is just packed into global arrays/variables.
 proc getNumButton { type } {
     global device Option numButton getDeviceModel numPadButtons
     
     set Option(1) "Button1"
     set t 1
-    if { [ string compare $type "eraser" ] } {
+    if { [ string compare -nocase $type "eraser" ] } {
 	set Option(2) "Button2"
 	set Option(3) "Button3"
 	set t [ expr ($t+2) ]
-	if { [ string compare $type "stylus" ] } {
+	if { [ string compare -nocase $type "stylus" ] } {
 	    set Option(4) "Button4"
 	    set Option(5) "Button5"
 	    set t [ expr ($t+2) ]
 	}
-	if { ![ string compare $type "pad" ] } {
+	if { ![ string compare -nocase $type "pad" ] } {
 	    set model $getDeviceModel($device,model)
 	    set t $numPadButtons($model)
 	    for { set i 6 } { $i <= $t } { incr i 1 } {
@@ -1058,6 +1289,7 @@ proc getNumButton { type } {
     set numButton $t
 }
 
+# Initialize a few arrays that relate to the device's strips
 proc setspName {} {
     global numButton spName startS device Option cKeys oldKeys
     global numPadRelW numPadStrips numPadRings getDeviceModel
@@ -1107,6 +1339,7 @@ proc setspName {} {
 
 }
 
+# Callback to set up the button window
 proc initialButton {} {
     global device Option numButton getDeviceModel 
     global spName numStrips
@@ -1114,7 +1347,7 @@ proc initialButton {} {
     set type $getDeviceModel($device,type)
     set t $numButton
 
-    if { [ string compare $type "pad" ] } {
+    if { [ string compare -nocase $type "pad" ] } {
 	set t [expr ($t+1)]
 	set Option($t) "Mode"
 	set t [expr ($t+1)]
@@ -1122,7 +1355,7 @@ proc initialButton {} {
     }
     getDeviceOptionProc $device $t
 
-    if { [ string compare $type "pad" ] } {
+    if { [ string compare -nocase $type "pad" ] } {
     	displayMode
     }
 
@@ -1134,7 +1367,7 @@ proc initialButton {} {
     }
 
     # then touch strip
-    if { ![ string compare $type "pad" ] } {
+    if { ![ string compare -nocase $type "pad" ] } {
 	expressKeys
     } else {
 	set numStrips 0
@@ -1148,7 +1381,7 @@ proc displayMode {} {
     set model $getDeviceModel($device,model)
     set type $getDeviceModel($device,type)
 
-    if { !$isLCD($model) && [ string compare $type "pad" ]  } { 
+    if { !$isLCD($model) && [ string compare -nocase $type "pad" ]  } {
 	set mode $getOption($device,Mode)
 	if { $mode == "Absolute" } { set mode 1 }
 	if { $mode == "Relative" } { set mode 0 }
@@ -1160,8 +1393,11 @@ proc displayMode {} {
 	grid $currentW.f.modeL -row 4 -column 0
     }
 
-    if { ![ string compare $type "stylus" ] } {
-	set smv $sm([ expr $getOption($device,TPCButton)+1 ])
+    if { ![ string compare -nocase $type "stylus" ] } {
+	set tpcbutton $getOption($device,TPCButton)
+	if { $tpcbutton == "on" } { set tpcbutton 1 }
+	if { $tpcbutton == "off" } { set tpcbutton 0 }
+	set smv $sm([ expr $tpcbutton + 1 ])
 	tk_optionMenu $currentW.f.smode smv $sm(1) $sm(2)
 	label $currentW.f.smodeL -text "Side Switch Mode: "
 	grid $currentW.f.smode -row 4 -column 4 
@@ -1169,10 +1405,19 @@ proc displayMode {} {
     }
 }
 
-# Sets up a subwindow.
-# okF is called when pressing the OK button
-# deF is called when pressing the Default (now Reset) button
-# initial is called on the first run to fill in the GUI.
+# Sets up a subwindow. This function is used as the -command argument on the
+# button creation, so tcl calls it exactly as specified in the command
+# string.
+# Arguments are three functions:
+# 	okF is bound to the Save button
+# 	deF (if nonzero) is bound to the Reset button
+# 	initial is called from displaySubWindow to setup the window
+# winID: the index into the global wNames() that contains the window
+# 	  title.
+# cbutton: if set, the window seems to be the keystroke window, otherwise
+# 	   it's the normal window. also copied into the global currentb
+# 	   variable
+# kcurrent: just copied into the global currentk variable
 proc displaySubWindow { okF deF initial winID cbutton kcurrent} {
     global currentb currentW wName currentk
 
@@ -1259,7 +1504,7 @@ proc expressKeys { } {
     global db11 db12 db13 db14 startS 
     global currentW device numButton spName numStrips
     global getDeviceModel cKeys oldKeys getOption
-    global displayToggleB ignoreButton keystrokeB screenToggleB
+    global displayToggleB ignoreButton keystrokeB
     global numPadRings numPadStrips numPadAbsW numPadRelW
 
     set name(1) "Wheel Up"
@@ -1287,8 +1532,7 @@ proc expressKeys { } {
 	set bmenu [ tk_optionMenu $currentW.f.$cur db$cur $db(1) $db(2) \
 	    $db(3) $db(4) $db(5) $db($ignoreButton) ]
 	$bmenu insert 7 radiobutton -label "$db($keystrokeB)" \
-	    -variable menvar -command "displaySubWindow \
-	    updateKeys 0 initialKeys 5 $cur $curOption"
+	    -variable menvar -command "displaySubWindow \ updateKeys 0 initialKeys 5 $cur $curOption"
 
 	label $currentW.f.name$cur -text "$name($i): "
 	set t2 [expr ($numButton+1)/2+1]
@@ -1315,7 +1559,7 @@ proc addMenu { curb } {
     global db db1 db2 db3 db4 db5 db6 db7 db8 db9 db10 
     global db11 db12 db13 db14 currentW device spName
     global getOption getDeviceModel cKeys oldKeys 
-    global keystrokeB doubleClickB screenToggleB
+    global keystrokeB
     global displayToggleB ignoreButton modeToggleB
 
     set model $getDeviceModel($device,model)
@@ -1330,15 +1574,15 @@ proc addMenu { curb } {
 	set oldKeys($spName($curb)) ""
     }
 
-    if { [string compare $type "pad"] } {
+    if { [string compare -nocase $type "pad"] } {
 	set bmenu [ tk_optionMenu $currentW.f.$curb db$curb $db(1) $db(2) \
-		$db(3) $db(4) $db(5) $db($doubleClickB) $db($modeToggleB) \
-		$db($displayToggleB) $db($screenToggleB) $db($ignoreButton) ]
+		$db(3) $db(4) $db(5) $db($modeToggleB) \
+		$db($displayToggleB) $db($ignoreButton) ]
 	set i 9
     } else {
 	set bmenu [ tk_optionMenu $currentW.f.$curb db$curb $db(1) $db(2) \
-		$db(3) $db(4) $db(5) $db($doubleClickB) $db($displayToggleB) \
-		$db($screenToggleB) $db($ignoreButton) ]
+		$db(3) $db(4) $db(5) $db($displayToggleB) \
+		$db($ignoreButton) ]
 	set i 8
     }
 
@@ -1359,7 +1603,8 @@ proc addMenu { curb } {
     grid $currentW.f.name$curb -row $t2 -column $t1
 }
 
-# sets up the mapping window to change the top/bottom x/y parameters
+# sets up the mapping window to change the top/bottom x/y parameters and the
+# device mode
 proc initialT {} {
     global device getDeviceModel currentW
     global getOption getOptionDefault Option
@@ -1389,6 +1634,7 @@ proc initialT {} {
 
 }
 
+# map the sliders to the matching TopX/BottomX, etc option
 proc addMapScale { t } {
     global getOption Option getOptionDefault device currentW
 
@@ -1402,6 +1648,8 @@ proc addMapScale { t } {
     $currentW.f.group.scale$t set $getOption($device,$Option($t))
 }
 
+# Callback for mapping (topX/BottomX,..) and mode, except that topX etc is
+# updated on-the-fly
 proc updateT {} {
     global getOption getOptionDefault Option device currentW
 
@@ -1417,6 +1665,7 @@ proc updateT {} {
     closeSubWindow
 }
 
+# Mode "reset" callback
 proc defaultT {} {
     global getOption getOptionDefault Option device currentW
 
@@ -1428,6 +1677,7 @@ proc defaultT {} {
     }
 }
 
+# Set up the "Feel" window
 proc initialTip {} {
     global device getDeviceModel getOption Option currentW
 
@@ -1492,10 +1742,13 @@ proc initialTip {} {
     grid $currentW.f.group -row 0 -column 5 
 }
 
+# Callback for setting the "Feel" values.
 proc updateTip {} {
     global device currentW getOption
 
     # 0 is a special value for PressCurve, see getDeviceOptionProc
+    # Map the numeric values of the selection to the actual 4-value pressure
+    # curve
     if { $getOption($device,PressCurve) != 0 } {
 	    switch [ $currentW.f.group.scale1 get ] {
 		1
@@ -1526,6 +1779,7 @@ proc updateTip {} {
     closeSubWindow
 }
 
+# Default "Feel" values
 proc defaultTip {} {
     global currentW
 
@@ -1533,6 +1787,7 @@ proc defaultTip {} {
     $currentW.f.group.scale2 set 6
 }
 
+# Initialize the TwinView/MM dialog box
 proc initialSet {} {
     global device getDeviceModel getOption Option
     global tvd tvID snd currentW
@@ -1549,13 +1804,11 @@ proc initialSet {} {
     set tvID $getOption($device,TwinView)
     set snd $getOption($device,Screen_no)
 
-    if { $snd == -1 } {
+    if { $snd == -1 || $snd == 255} {
 	set snd "Desktop" 
     } else {
 	set snd "Screen$snd"
     }
-
-    if { [ string compare $numS "Not implemented" ] } { set numS 1 }
 
     if { $numS == 1 } {
 	set sn0 "Desktop" 
@@ -1582,19 +1835,19 @@ proc initialSet {} {
 
     label $currentW.f.tv -text "TwinView Setup: "
     set tv(0) "None"
-    set tv(1) "Xinerama"
-    set tv(2) "Vertical"
-    set tv(3) "Horizontal"
-    set tv(4) "AboveOf"
-    set tv(5) "LeftOf"
+    set tv(1) "Vertical"
+    set tv(2) "Horizontal"
+    set tv(3) "AboveOf"
+    set tv(4) "LeftOf"
 
-    for { set i 0 } { $i < 6 } { incr i 1 } {
-	if { $tvID == $i } {
+    for { set i 0 } { $i < 5 } { incr i 1 } {
+	if { ![ string compare -nocase $tvID $tv($i) ] } {
 	    set tvd $tv($i)
+	    break
 	}
     }
 
-    tk_optionMenu $currentW.f.tvmenu tvd $tv(0) $tv(1) $tv(2) $tv(3) $tv(4) $tv(5)
+    tk_optionMenu $currentW.f.tvmenu tvd $tv(0) $tv(1) $tv(2) $tv(3) $tv(4)
     grid $currentW.f.tv -row 4 -column 0 
     grid $currentW.f.tvmenu -row 4 -column 1
 
@@ -1610,10 +1863,50 @@ proc initialSet {} {
     grid $currentW.f.message4 -row 3 -column 1
 }
 
+# Guess the TwinView resolution from the xdpyinfo XINERAMA output, then load
+# that into the device
+proc guessTVResolution { device tv} {
+    # xdpyinfo output is e.g. #head0: 1280x1024 @ 0,0
+    # extract the resolution into a "1280 1024 0 0" string
+    set regex { s/.* \([0-9]\+\)x\([0-9]\+\) @ \([0-9]\+\),\([0-9]\+\).*/\1 \2 \3 \4/ }
+
+    set head0 [ exec xdpyinfo -ext XINERAMA | grep "head #0" | sed -e $regex ]
+    set head1 [ exec xdpyinfo -ext XINERAMA | grep "head #1" | sed -e $regex ]
+
+    catch {
+	set tvres0 [split $head0 " "]
+	set tvres1 [split $head1 " "]
+
+	set w1 [ lindex $tvres0 0 ]
+	set h1 [ lindex $tvres0 1 ]
+	set w2 [ lindex $tvres1 0 ]
+	set h2 [ lindex $tvres1 1 ]
+
+	set off1 [ lindex $tvres0 2 ]
+	set off2 [ lindex $tvres0 3 ]
+
+	if { $off1 != 0 || $off2 != 0 } {
+	    # first screen has non-zero offset, swap around
+	    set tmp $w1
+	    set w1 $w2
+	    set w2 $tmp
+
+	    set tmp $h1
+	    set h1 $h2
+	    set h2 $tmp
+	}
+
+	exec xsetwacom set "$device" TVResolution "$w1 $h1 $w2 $h2"
+	updateWacomrc $device TVResolution "$w1 $h1 $w2 $h2"
+    }
+}
+
+# Callback for saving TwinView/MM mappings
 proc updateSet {} {
     global device currentW tvd snd tvID
 
-    set numS [ exec xsetwacom get "$device" NumScreen ]
+    # See procCreateScreenList for comment to next line
+    set numS [ getNumScreen $device ]
 
     if { $numS > 1 } {
 	set sn [ $currentW.f.snsmenu cget -text ]
@@ -1632,32 +1925,33 @@ proc updateSet {} {
 
     set tv [ $currentW.f.tvmenu cget -text ]
     if { ![ string compare $tv "None" ] } {
-	set tv 0
-    }
-    if { ![ string compare $tv "Xinerama" ] } {
-	set tv 1
+	set tv "none"
     }
     if { ![ string compare $tv "Horizontal" ] } {
-	set tv 3
+	set tv "horizontal"
     }
     if { ![ string compare $tv "Vertical" ] } {
-	set tv 2
+	set tv "vertical"
     }
     if { ![ string compare $tv "LeftOf" ] } {
-	set tv 5
+	set tv "leftof"
     }
     if { ![ string compare $tv "AboveOf" ] } {
-	set tv 4
+	set tv "aboveof"
     }
 
     if { $tv != $tvID } {
 	updateWacomrc $device TwinView $tv
 	set getOption($device,TwinView) $tv
+	if { $tv != "none" } {
+	    guessTVResolution $device $tv
+	}
     }
 
     closeSubWindow
 }
 
+# Default Twinview/MM values
 proc defaultSet {} {
     global tvd snd
 
@@ -2000,6 +2294,8 @@ proc createPanel { pressure button mapping calibrate } {
     grid .panel -row 0 -column 1 -columnspan 8 -sticky news -padx 10 -pady 40
 }
 
+# Initialize a few arrays based on the fixed model numbers so that later we
+# can call isLCD(model number) and get the right value
 proc updateModelInfo { } {
     global isLCD numPadButtons numPadRings hasPad hasTouch
     global numPadStrips numPadAbsW numPadRelW 
@@ -2029,7 +2325,7 @@ proc updateModelInfo { } {
     set isLCD(227) 1 
 
     #Cintiq
-    for { set i 192 } { $i <= 199 } { incr i 1 } {
+    for { set i 197 } { $i <= 204 } { incr i 1 } {
 	set isLCD($i) 1 
     }
 
@@ -2046,6 +2342,11 @@ proc updateModelInfo { } {
     #Cintiq 21UX
     set numPadButtons(63) 8
     set numPadStrips(63) 2
+
+    #Cintiq 21UX2
+    set numPadButtons(204) 18
+    set numPadStrips(204) 2
+
     # Bamboo
     for { set i 101 } { $i <= 105 } { incr i 1 } {
 	set numPadButtons($i) 4
@@ -2108,10 +2409,10 @@ proc updateModelInfo { } {
 
 proc createControls { } {
     global numScreens currentScreen cKeys spName
-    global oldKeys numStrips
+    global oldKeys numStrips maxNumButtons maxNumStripEvents
     global workingTags db dm sm wName bName numButton
-    global doubleClickB ignoreButton displayToggleB 
-    global modeToggleB keystrokeB screenToggleB 
+    global ignoreButton displayToggleB
+    global modeToggleB keystrokeB
 
     createDeviceListPanel 
     updateModelInfo
@@ -2121,15 +2422,14 @@ proc createControls { } {
     set db(3) "Right"
     set db(4) "Fourth"
     set db(5) "Fifth"
-    set db(6) "Ignore"
-    set db(7) "Ignore"
-    set db(8) "Ignore"
-    set db(9) "Ignore"
-    set db(10) "Ignore"
-    set db($doubleClickB) "Left Double"
+
+    set numB [ expr ($maxNumButtons + $maxNumStripEvents) ]
+    for { set i 6 } { $i <= $numB } { incr i 1 } {
+	set db($i) "Ignore"
+    }
+
     set db($modeToggleB) "Mode Toggle"
     set db($displayToggleB) "Display Toggle"
-    set db($screenToggleB) "Screen Toggle"
     set db($ignoreButton) "Ignore"
     set db($keystrokeB) "KeyStroke"
     set dm(1) "Relative"
@@ -2145,10 +2445,6 @@ proc createControls { } {
     set wName(4) "Screen Mapping"
     set wName(5) "Keystrokes"
     set wName(6) "Tablet Controls"
-
-    # up to the max number of buttons
-    set numButton 10
-    set numStrips 4
 
 #   Real help will be supported later
 #    checkbutton .showHelp -text "Turn Help on" -anchor w \
@@ -2168,11 +2464,26 @@ proc createControls { } {
 
 proc CalibrateOnly { numArg argList } {
     global device calibration_sequence_only calibration_with_warning
+    global deviceList
 
     set calibration_sequence_only 1
     set device [ lrange $argList 1 end ]
 
     createDeviceList
+
+    set found 0
+    foreach dev $deviceList {
+	if { [ string compare $dev $device ] == 0 } {
+	    set found 1
+	    break;
+	}
+    }
+
+    if { !$found } {
+	    messageWindow "Error" "\n\n Device $device not found. \n"
+	    exit 1
+    }
+
     createScreenList $device
     if { $numArg == 3 } {
 	set calibration_with_warning 1

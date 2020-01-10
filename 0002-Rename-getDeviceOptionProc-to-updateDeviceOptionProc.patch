@@ -1,0 +1,141 @@
+From ebe8c05ca35dc8c68a6749353a3dea8d87ee2baa Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Fri, 17 Jun 2011 04:06:02 +1000
+Subject: [PATCH 2/7] Rename getDeviceOptionProc to updateDeviceOptionProc
+
+This function doesn't _get_ anything, it retrieves the values and then
+updates a global array. There is no meaningful return values.
+---
+ wacomcpl-exec |   29 +++++++++++++++--------------
+ 1 files changed, 15 insertions(+), 14 deletions(-)
+
+diff --git a/wacomcpl-exec b/wacomcpl-exec
+index b62f135..94c5135 100755
+--- a/wacomcpl-exec
++++ b/wacomcpl-exec
+@@ -80,14 +80,14 @@ exec wish -f "$0" ${1+"$@"}
+ #	array, two values, "Relative" and "Absolute"
+ # getOption(device name, option name):
+ #	Stores the value of the option for the device, after a call to
+-#	getDeviceOptionProc (see there for more details)
++#	updateDeviceOptionProc (see there for more details)
+ # hasPad():
+ # hasTouch():
+ # hasGesture():
+ # isLCD():
+ #	boolean array, index is the model number
+ # Option():
+-#	Option values to be retrieved by getDeviceOptionProc  (see there for
++#	Option values to be retrieved by updateDeviceOptionProc  (see there for
+ #	more details)
+ # numPadButtons():
+ # numPadRelW():
+@@ -535,7 +535,7 @@ proc Calibration {} {
+     set Option(5) "Mode"
+     set Option(6) "TwinView"
+ 
+-    getDeviceOptionProc $device 6
++    updateDeviceOptionProc $device 6
+     set mode $getOption($device,Mode)
+     set tvID $getOption($device,TwinView)
+ 
+@@ -614,6 +614,7 @@ proc startCalibration {} {
+     # Start calib sequence
+     catch {unset calibResults}
+     exec xsetwacom set "$device" xydefault 0
++
+     .topleft.m configure -background "#df94df"
+     # hide the cursor
+     .topleft.m configure -cursor "center_ptr #df94df #df94df"
+@@ -730,11 +731,11 @@ proc disableButtons {} {
+ # name, option name). e.g. if you need options Foo and Bar, you'd do
+ #	set Option(1) "Foo"
+ #	set Option(2) "Bar"
+-#	getDeviceOptionProc $device $2
++#	updateDeviceOptionProc $device $2
+ #	set foo_value $getOption($device,Foo)
+ #
+ # I'm not kidding.
+-proc getDeviceOptionProc { dev i } {
++proc updateDeviceOptionProc { dev i } {
+     global getOption getOptionDefault Option oldKeys modeToggleB
+     global displayToggleB ignoreButton keystrokeB
+     global numStrips numControls numButton spName
+@@ -1313,13 +1314,13 @@ proc setspName {} {
+ 	set Option($i) $spName($i)
+     }
+ 
+-    # initial keys before we call getDeviceOptionProc
++    # initial keys before we call updateDeviceOptionProc
+     for { set i 1 } { $i <= $numControls } { incr i 1 } {
+ 	set oldKeys($spName($i)) ""
+ 	set cKeys($spName($i)) ""
+     }
+ 
+-    getDeviceOptionProc $device $numControls
++    updateDeviceOptionProc $device $numControls
+ 
+     set s1 5
+     set s2 8
+@@ -1353,7 +1354,7 @@ proc initialButton {} {
+ 	set t [expr ($t+1)]
+ 	set Option($t) "TPCButton"
+     }
+-    getDeviceOptionProc $device $t
++    updateDeviceOptionProc $device $t
+ 
+     if { [ string compare -nocase $type "pad" ] } {
+     	displayMode
+@@ -1615,7 +1616,7 @@ proc initialT {} {
+     set Option(4) "BottomY"
+     set Option(5) "Mode"
+ 
+-    getDeviceOptionProc $device 7
++    updateDeviceOptionProc $device 7
+ 
+     set mode $getOption($device,Mode)
+     frame $currentW.f.group -bd 10 -bg beige -width 150 -height 150
+@@ -1685,11 +1686,11 @@ proc initialTip {} {
+     set Option(2) "ClickForce"
+     set Option(3) "RawSample"
+     set Option(4) "Suppress"
+-    getDeviceOptionProc $device 4
++    updateDeviceOptionProc $device 4
+ 
+     frame $currentW.f.group -bd 10 -bg beige -width 150 -height 150
+ 
+-    # 0 is a special value, see getDeviceOptionProc.
++    # 0 is a special value, see updateDeviceOptionProc.
+     # Only display Tip sensitivity for those that have PressCurve
+     if { $getOption($device,PressCurve) != 0 } {
+ 	label $currentW.f.group.groupl1 -text "Tip Sensitivity: "
+@@ -1746,7 +1747,7 @@ proc initialTip {} {
+ proc updateTip {} {
+     global device currentW getOption
+ 
+-    # 0 is a special value for PressCurve, see getDeviceOptionProc
++    # 0 is a special value for PressCurve, see updateDeviceOptionProc
+     # Map the numeric values of the selection to the actual 4-value pressure
+     # curve
+     if { $getOption($device,PressCurve) != 0 } {
+@@ -1798,7 +1799,7 @@ proc initialSet {} {
+     set Option(1) "NumScreen"
+     set Option(2) "TwinView"
+     set Option(3) "Screen_no"
+-    getDeviceOptionProc $device 3
++    updateDeviceOptionProc $device 3
+ 
+     set numS  $getOption($device,NumScreen)
+     set tvID $getOption($device,TwinView)
+@@ -2280,7 +2281,7 @@ proc createPanel { pressure button mapping calibrate } {
+     if { [string compare $getDeviceModel($device,type) "touch"] &&
+ 	    [string compare $getDeviceModel($device,type) "pad"] } { #not a pad or touch
+ 	set Option(1) "Mode"
+-	getDeviceOptionProc $device 1
++	updateDeviceOptionProc $device 1
+ 	set mode $getOption($device,Mode)
+ 	if { ($pressure || $mapping) && ($mode == "Absolute" || $mode == "1") } {  #and in absolute mode
+ 	    set bName(advanced) 1
+-- 
+1.7.1
+

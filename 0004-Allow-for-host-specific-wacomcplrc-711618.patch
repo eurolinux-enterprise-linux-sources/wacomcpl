@@ -1,0 +1,116 @@
+From 0aa5ee9f839ff3120775cd573ac23df4951d5371 Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Mon, 23 May 2011 15:59:57 +1000
+Subject: [PATCH 4/7] Allow for host-specific wacomcplrc (#711618)
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ wacomcpl-exec |   10 ++++++++++
+ wacomcpl.man  |   32 +++++++++++++++++++++++++++++++-
+ wacomcpl.sh   |   16 ++++++++++++----
+ 3 files changed, 53 insertions(+), 5 deletions(-)
+
+diff --git a/wacomcpl-exec b/wacomcpl-exec
+index 43df42e..07bfe6b 100755
+--- a/wacomcpl-exec
++++ b/wacomcpl-exec
+@@ -2495,6 +2495,16 @@ proc CalibrateOnly { numArg argList } {
+     Calibration
+ }
+ 
++# Save to hostname-specific wacomcplrc
++# Note: TCL's argv does not include command name, 0 is first argument
++if { $argc > 0 && [lindex $argv 0] == "--use-hostname" } {
++    set hostname [ info hostname ]
++    set config_file "~/.wacomcplrc.$hostname"
++    set argc [ expr ($argc - 1) ]
++    set argv [ lrange $argv 1 end ]
++}
++
++
+ if { $argc > 1 && [lindex $argv 0] == "calibrate" } {
+     wm title . "Wacom Control Panel -Calibration"	
+     CalibrateOnly $argc $argv
+diff --git a/wacomcpl.man b/wacomcpl.man
+index 3173630..6824022 100644
+--- a/wacomcpl.man
++++ b/wacomcpl.man
+@@ -4,18 +4,48 @@
+ wacomcpl - graphical utility to configure Wacom tablets
+ 
+ .SH SYNOPSIS
+-.B wacomcpl [calibrate <device> [warning]]
++.B wacomcpl [--use-hostname] [calibrate <device> [warning]]
+ 
+ .SH DESCRIPTION
+ wacomcpl is a graphical utility to configure and calibrate Wacom tablet
+ devices.
+ .SH OPTIONS
+ .TP 8
++.B --use-hostname
++If set,
++.B wacomcpl
++will append the hostname to the wacomcplrc file written out. See
++.B CONFIGURATION STORAGE
++below.
++.TP 8
+ .B calibrate \fIdevice\fP [\fIwarning\fP]
+ Bring up the calibration screen for the specified \fIdevice\fP. For any
+ value of \fIwarning\fP, a coordinate check is performed after calibration.
+ If the coordinates appear to be out of scope, a warning messages is
+ displayed.
++.SH CONFIGURATION STORAGE
++Any changes performed by wacomcpl are written to the configuration file. The initrc script provided by this package loads this configuration file in the following order:
++.PP 4
++If a
++.B .wacomcplrc.<hostname>
++file is present in the user's home directory, this file is loaded. Otherwise,
++.PP 4
++if a
++.B .wacomcplrc
++file is present in the user's home directory, this file is loaded. Otherwise,
++.PP 4
++if a
++.B /etc/wacomcpl.conf
++file is present, this file is loaded.
++.SH FILES
++.TP 30
++.B $HOME/.wacomcplrc
++.TP 30
++.B $HOME/.wacomcplrc.<hostname>
++.TP 30
++.B /etc/wacomcpl.conf
++.TP 30
++.B /etc/X11/xinit/xinitrc.d/wacomcpl.sh
+ .SH "SEE ALSO"
+ wacom(4), xsetwacom(7)
+ .SH COPYRIGHT
+diff --git a/wacomcpl.sh b/wacomcpl.sh
+index 109675c..01c5252 100644
+--- a/wacomcpl.sh
++++ b/wacomcpl.sh
+@@ -2,9 +2,17 @@
+ #
+ # Drop this into /etc/X11/xinit/xinitrc.d/
+ 
+-CONFIG_FILE=~/.wacomcplrc
++DEFAULT_CONFIG_FILE=~/.wacomcplrc
++SYSTEM_CONFIG_FILE=/etc/wacomcpl.conf
++HOST_CONFIG_FILE=~/.wacomcplrc.`hostname`
+ 
+-if [ -f "$CONFIG_FILE" ]; then
+-    . "$CONFIG_FILE";
++# Host-specific config files are newer than non-specific ones.
++# Prefer them where possible. System-wide config files are last in priority
++# to allow users override settings (e.g. calibration)
++if [ -f "$HOST_CONFIG_FILE" ]; then
++    . "$HOST_CONFIG_FILE"
++elif [ -f "$DEFAULT_CONFIG_FILE" ]; then
++    . "$DEFAULT_CONFIG_FILE";
++elif [ -f "$SYSTEM_CONFIG_FILE" ]; then
++    . "$SYSTEM_CONFIG_FILE"
+ fi
+-
+-- 
+1.7.1
+
