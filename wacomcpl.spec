@@ -1,6 +1,6 @@
 Name:           wacomcpl
 Version:        0.9.0
-Release:        1%{?dist}.2
+Release:        3%{?dist}
 Summary:        Wacom driver configuration tool
 
 Group:          User Interface/X
@@ -46,6 +46,10 @@ Patch026:       0010-Fix-reset-handling-for-displaytoggle-modetoggle-and-.patch
 
 Patch027:       0001-update-the-screen-number-when-calibrating.patch
 
+# Bug 694346 Cintiq support 
+Patch028:       0001-Fill-the-default-button-array-with-up-to-max-buttons.patch
+Patch029:       0002-Add-Cintiq-model-support.patch
+
 # wacom driver doesn't exist on those
 ExcludeArch:    s390 s390x
 
@@ -53,7 +57,7 @@ BuildRequires:  automake libtool
 BuildRequires:  libX11-devel libXext-devel libXi-devel
 BuildRequires:  tcl-devel tk-devel desktop-file-utils
 
-Requires:       xorg-x11-drv-wacom >= 0.10.5-6%{?dist}.2
+Requires:       xorg-x11-drv-wacom >= 0.10.5-8
 Requires:       libX11 libXi libXext
 Requires:       tcl tk
 # for xdpyinfo
@@ -93,6 +97,8 @@ the xorg-x11-drv-wacom driver.
 %patch025 -p1 
 %patch026 -p1 
 %patch027 -p1 
+%patch028 -p1 
+%patch029 -p1 
 
 %build
 autoreconf -v --install || exit 1
@@ -132,13 +138,16 @@ rm -rf %{buildroot}
 %{_datadir}/wacomcpl/wacomcpl-icon.png
 
 %changelog
-* Thu Feb 03 2011 Peter Hutterer <peter.hutterer@redhat.com> 0.9.0-1.2
-- Multiple patches to address button mapping issues (#624560, z-stream #642915).
+* Tue Apr 12 2011 Peter Hutterer <peter.hutterer@redhat.com> 0.9.0-3
+- Add Cintiq support (#694346)
+
+* Thu Feb 03 2011 Peter Hutterer <peter.hutterer@redhat.com> 0.9.0-3
+- Multiple patches to address button mapping issues (#624560).
 - update the screen number when updating
 - requires updated xorg-x11-drv-wacom for the matching fixes to xsetwacom
   and the driver.
 
-* Fri Oct 15 2010 Peter Hutterer <peter.hutterer@redhat.com> 0.9.0-1.1
+* Thu Oct 14 2010 Peter Hutterer <peter.hutterer@redhat.com> 0.9.0-2
 - Multiple patches to address issues with TwinView calibration and setting
   (#624560)
 - requires xorg-x11-drv-wacom-0.10.5-7 for TwinView fixes.

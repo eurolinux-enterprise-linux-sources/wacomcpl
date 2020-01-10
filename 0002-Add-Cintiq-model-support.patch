@@ -1,0 +1,40 @@
+From b9125e1e8d6354f06d14e997afea5ea26555452b Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Thu, 7 Apr 2011 13:01:17 +1000
+Subject: [PATCH] Add Cintiq model support
+
+Taken from the linuxwacom commit "Added support for Cintiq 21UX2"
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ wacomcpl-exec |    7 ++++++-
+ 1 files changed, 6 insertions(+), 1 deletions(-)
+
+diff --git a/wacomcpl-exec b/wacomcpl-exec
+index 3717c9b..a213bbc 100755
+--- a/wacomcpl-exec
++++ b/wacomcpl-exec
+@@ -2154,7 +2154,7 @@ proc updateModelInfo { } {
+     set isLCD(227) 1 
+ 
+     #Cintiq
+-    for { set i 192 } { $i <= 199 } { incr i 1 } {
++    for { set i 197 } { $i <= 204 } { incr i 1 } {
+ 	set isLCD($i) 1 
+     }
+ 
+@@ -2171,6 +2171,11 @@ proc updateModelInfo { } {
+     #Cintiq 21UX
+     set numPadButtons(63) 8
+     set numPadStrips(63) 2
++
++    #Cintiq 21UX2
++    set numPadButtons(204) 18
++    set numPadStrips(204) 2
++
+     # Bamboo
+     for { set i 101 } { $i <= 105 } { incr i 1 } {
+ 	set numPadButtons($i) 4
+-- 
+1.7.4.2
+

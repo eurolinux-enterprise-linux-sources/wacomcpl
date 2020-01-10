@@ -1,0 +1,66 @@
+From f5cd971950930cadfb6db232e0ef60b3a6c3852c Mon Sep 17 00:00:00 2001
+From: Peter Hutterer <peter.hutterer@who-t.net>
+Date: Thu, 7 Apr 2011 13:07:48 +1000
+Subject: [PATCH] Fill the default button array with up to max buttons "Ignore"
+
+With max buttons now being 18 (thanks to the Cintiq)
+
+Signed-off-by: Peter Hutterer <peter.hutterer@who-t.net>
+---
+ wacomcpl-exec |   19 +++++++++----------
+ 1 files changed, 9 insertions(+), 10 deletions(-)
+
+diff --git a/wacomcpl-exec b/wacomcpl-exec
+index 09e68f6..3717c9b 100755
+--- a/wacomcpl-exec
++++ b/wacomcpl-exec
+@@ -70,6 +70,8 @@ set displayToggleB 36
+ set keystrokeB 38
+ set maxNumTablets 227
+ set numControls 0
++set maxNumButtons 18
++set maxNumStripEvents 4
+ set calibration_sequence_only 0
+ set calibration_with_warning 0
+ 
+@@ -2231,7 +2233,7 @@ proc updateModelInfo { } {
+ 
+ proc createControls { } {
+     global numScreens currentScreen cKeys spName
+-    global oldKeys numStrips
++    global oldKeys numStrips maxNumButtons maxNumStripEvents
+     global workingTags db dm sm wName bName numButton
+     global ignoreButton displayToggleB
+     global modeToggleB keystrokeB
+@@ -2244,11 +2246,12 @@ proc createControls { } {
+     set db(3) "Right"
+     set db(4) "Fourth"
+     set db(5) "Fifth"
+-    set db(6) "Ignore"
+-    set db(7) "Ignore"
+-    set db(8) "Ignore"
+-    set db(9) "Ignore"
+-    set db(10) "Ignore"
++
++    set numB [ expr ($maxNumButtons + $maxNumStripEvents) ]
++    for { set i 6 } { $i <= $numB } { incr i 1 } {
++	set db($i) "Ignore"
++    }
++
+     set db($modeToggleB) "Mode Toggle"
+     set db($displayToggleB) "Display Toggle"
+     set db($ignoreButton) "Ignore"
+@@ -2267,10 +2270,6 @@ proc createControls { } {
+     set wName(5) "Keystrokes"
+     set wName(6) "Tablet Controls"
+ 
+-    # up to the max number of buttons
+-    set numButton 10
+-    set numStrips 4
+-
+ #   Real help will be supported later
+ #    checkbutton .showHelp -text "Turn Help on" -anchor w \
+ #	    -variable showHelp -state normal  
+-- 
+1.7.4.2
+
